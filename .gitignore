@@ -75,3 +75,6 @@ Thumbs.db
 .env
 *.key
 credentials.json
+
+# Project-specific
+CLAUDE.md
