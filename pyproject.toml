@@ -1,0 +1,76 @@
+[project]
+name = "atlas-tnt"
+version = "0.1.0"
+description = "Atlas with TNT Training - PRD v4.2"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "-ra",
+]
+markers = [
+    "unit: Fast unit tests (no GPU, no network)",
+    "integration: Integration tests (may be slow)",
+    "gpu: Requires CUDA GPU",
+    "network: Requires network access",
+    "slow: Takes >5s to run",
+    "isolation: ML isolation tests (run before training)",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+show_error_codes = true
+show_column_numbers = true
+
+# Per-module overrides
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "numpy.*",
+    "transformers.*",
+    "datasets.*",
+    "tqdm.*",
+    "yaml.*",
+]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = [
+    "tests/*",
+    "scripts/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
