@@ -1,0 +1,25 @@
+# Atlas with TNT Training - Dependencies
+# PRD v4.2 Implementation
+
+torch>=2.0.0
+pyyaml>=6.0
+numpy>=1.20.0
+
+# Configuration (REQUIRED - no silent defaults)
+pydantic>=2.0.0
+
+# Data loading (HuggingFace)
+datasets>=2.14.0
+transformers>=4.30.0
+
+# Progress bars
+tqdm>=4.65.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+mypy>=1.0.0
+
+# Optional: for monitoring
+# tensorboard>=2.10.0
+# wandb>=0.13.0
