@@ -1,0 +1,137 @@
+# TNT-Atlas: Memory-Augmented Transformer Training
+
+> **WORK IN PROGRESS**: This codebase is under active development and has not yet produced a successfully trained model. The architecture and training methodology are experimental. The iterative failure analysis documented here is part of the research process.
+
+## Overview
+
+TNT-Atlas is an experimental implementation combining:
+
+- **ATLAS**: Memory-Augmented Gating architecture with polynomial feature expansion
+- **TNT (Transformer-in-Transformer)**: Hierarchical training methodology with shard-based context windows
+- **Titans-inspired**: Hybrid caching and M3 mixing for memory state management
+
+This project explores whether memory-augmented attention mechanisms can improve language model performance on long-context tasks.
+
+## Current Status
+
+| Run | Gain | Result | Issue |
+|-----|------|--------|-------|
+| Run #1 | 0.5 | FAILED | Dead gates - tanh operating in linear region |
+| Run #2 | 2.0 | FAILED | Linear gates - model bypassed memory system |
+| Run #3 | 4.0 | PENDING | Attempting forced nonlinear operation |
+
+See [docs/PRD_RUN2_FIXES.md](docs/PRD_RUN2_FIXES.md) for detailed failure analysis and iterative fixes.
+
+## Architecture
+
+```
+ATLAS-MAG BLOCK (with TNT training)
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│   Input x                                                   │
+│       │                                                     │
+│       ├──────────────────────────┐                          │
+│       │                          │                          │
+│       ▼                          ▼                          │
+│  ┌─────────────────┐   ┌───────────────────────────┐       │
+│  │ SLIDING WINDOW  │   │ ATLAS DEEP MEMORY         │       │
+│  │ ATTENTION       │   │                           │       │
+│  │                 │   │ • Q-K Projection (tanh)   │       │
+│  │ • Window size w │   │ • Polynomial features φ   │       │
+│  │ • Persistent P  │   │ • Omega rule (context c)  │       │
+│  │ • Causal window │   │ • Newton-Schulz update    │       │
+│  └────────┬────────┘   └─────────────┬─────────────┘       │
+│           │                          │                      │
+│           ▼                          ▼                      │
+│      [LayerNorm]                [LayerNorm]                 │
+│           │                          │                      │
+│           ▼                          │                      │
+│      [sigmoid]                       │                      │
+│           │                          │                      │
+│           └──────────► (*) ◄─────────┘                      │
+│                         │                                   │
+│                         ▼                                   │
+│                  [Out Projection]                           │
+│                         │                                   │
+│                        (+) <── residual                     │
+│                         │                                   │
+│                         ▼                                   │
+│                      Output                                 │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Project Structure
+
+```
+atlas_tnt/
+├── configs/           # Pydantic-validated configuration
+├── docs/              # Design documents and PRDs
+├── scripts/           # Training and evaluation scripts
+│   ├── train.py       # Main training loop with kill switches
+│   ├── preflight_gates.py  # Pre-training validation
+│   └── prepare_data.py     # Data preparation
+├── src/               # Core implementation
+│   ├── atlas_block.py      # AtlasMAG block
+│   ├── qk_projection.py    # Q-K projection with tanh gates
+│   ├── m3_mixing.py        # Memory state mixing
+│   ├── polynomial.py       # Polynomial feature expansion
+│   └── config_schema.py    # Pydantic V2 configuration
+└── tests/             # Isolation and integration tests
+```
+
+## Key Design Decisions
+
+### 1. No Hidden Defaults
+All configuration uses Pydantic V2 with explicit required fields. If a config value is missing, the script fails fast with a clear error.
+
+### 2. Kill Switches Over Monitoring
+Training includes hard kill switches that terminate runs when architectural failures are detected:
+- **Activation Kill Switch**: Terminates if tanh gates stay in linear region
+- **Alpha Guardrails**: Terminates if M3 mixing collapses to extremes
+- **Saturation Kill Switch**: Terminates if gates enter "coma" (saturated) state
+
+### 3. Pre-Flight Gates
+Mandatory validation before training:
+- Gate 1: Proof of Life (gates can reach nonlinear operation)
+- Gate 2: Baton Pass (state transfer across shard boundaries)
+- Gate 3: Seed Competition (seeded model outperforms random)
+- Gate 4: Memory Ablation (memory affects predictions)
+
+## Usage
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run pre-flight gates (MANDATORY)
+python scripts/preflight_gates.py
+
+# Run isolation suite
+python tests/test_isolation.py
+
+# Start training
+python scripts/train.py --config configs/default.yaml
+```
+
+## References
+
+This implementation draws from:
+- ATLAS architecture papers
+- TNT (Transformer-in-Transformer) training methodology
+- Titans hybrid memory architectures
+- Nested Learning (Ad Hoc Level Stacking)
+
+## Disclaimer
+
+**This code represents experimental research in progress.** No guarantees are made about:
+- Correctness of implementation
+- Training stability
+- Model performance
+- Production readiness
+
+The documented failures and iterative fixes are an intentional part of the research methodology.
+
+## License
+
+This project is for research and educational purposes.
