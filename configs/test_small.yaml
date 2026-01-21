@@ -1,0 +1,110 @@
+# Atlas with TNT Training - Small Test Configuration
+# For quick validation of data pipeline
+
+# Model Configuration
+model:
+  # Vocabulary (GPT-2 tokenizer)
+  vocab_size: 50257        # GPT-2 vocabulary size
+
+  # Core dimensions (smaller for testing)
+  d_model: 256           # Model dimension
+  n_heads: 4             # Attention heads
+  n_layers: 2            # Number of AtlasMAG blocks
+
+  # MAG parameters
+  window_size: 128       # Sliding window attention
+  n_persistent: 2        # Persistent memory tokens
+
+  # Atlas memory parameters
+  omega_context: 4       # Omega rule context window (c)
+  poly_degree: 2         # FIXED architectural choice
+  ns_iterations: 1       # Base Newton-Schulz iterations
+
+  # M3 Mixing parameters
+  m3_alpha_target: 0.5
+  m3_alpha_start: 0.1
+  m3_warmup_steps: 100
+
+  # Safety parameters
+  qk_gain_circuit_breaker: 2.0
+  saturation_kill_threshold: 0.20
+  saturation_kill_patience: 100
+
+  # Dropout
+  dropout: 0.1
+
+# Training Configuration
+training:
+  stage1:
+    shard_length: 512     # Shorter shards for testing
+    total_tokens: 100_000  # Just 100K tokens for quick test
+    chunk_size: 64        # Smaller chunks
+
+  stage2:
+    chunk_sizes: [2, 4, 8, 16]
+    tokens_per_chunk: 10_000
+
+  optimizer: "AdamW"
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+  lr:
+    peak: 1e-4
+    min: 1e-6
+    warmup_steps: 100
+    schedule: "cosine"
+
+  differential_lr_ratio: 0.01
+
+  batch_size: 2
+  gradient_accumulation: 1
+
+  checkpoint_interval: 1000
+  eval_interval: 500
+
+# Cache Configuration
+cache:
+  enabled: true
+  lazy_threshold: 0
+  gradient_magnitude_threshold: 1.0e-8
+
+# Logging
+logging:
+  level: "INFO"
+  tensorboard: false
+  wandb: false
+
+  telemetry:
+    log_interval: 10
+    track_saturation: true
+    track_alpha: true
+    track_cache_stats: true
+
+# Hardware Configuration
+hardware:
+  device: "cuda"
+  dtype: "bfloat16"
+  distributed: false
+
+# Validation Gates
+validation:
+  isolation_suite: false  # Skip for quick tests
+  max_nan_steps: 0
+  max_loss_spike_ratio: 3.0
+  min_alpha_range: [0.1, 0.9]
+
+# Paths
+paths:
+  data_dir: "data/"
+  checkpoint_dir: "runs/checkpoints/"
+  log_dir: "runs/logs/"
+  tensorboard_dir: "runs/tensorboard/"
+
+# Dataset Configuration - use TinyStories for quick test
+data:
+  dataset: "roneneldan/TinyStories"
+  subset: null
+  text_column: "text"
+  tokenizer: "gpt2"
+  pretokenized_path: null
+  streaming: true

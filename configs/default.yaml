@@ -1,0 +1,217 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Atlas with TNT Training - Default Configuration
+# PRD v4.2 Implementation
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# IMPORTANT: ALL fields are REQUIRED. No silent defaults.
+# If you remove or comment out any field, the script will FAIL with a clear error.
+#
+# Validated by: src/config_schema.py (Pydantic V2)
+# Chinchilla-optimal: 58M params × 20 = 1.16B tokens
+# Seed model: HuggingFaceTB/SmolLM-135M (for ad hoc level stacking)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Model Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+model:
+  # Vocabulary - MUST match tokenizer (SmolLM = 49152)
+  vocab_size: 49152
+
+  # Core dimensions (Phase 1: ~58M parameters)
+  # d_model=576 matches SmolLM-135M for seed model weight transfer
+  d_model: 576                    # Model embedding dimension (matches SmolLM-135M)
+  n_heads: 9                      # Attention heads (576/9 = 64 per head, matches SmolLM)
+  n_layers: 6                     # Number of AtlasMAG blocks
+
+  # MAG (Memory-Augmented Gating) parameters
+  window_size: 256                # Sliding window attention size
+  n_persistent: 4                 # Persistent memory tokens
+
+  # Atlas memory parameters
+  omega_context: 8                # Omega rule context window
+  poly_degree: 2                  # Polynomial degree (2 = O(d²) capacity)
+  ns_iterations: 1                # Base Newton-Schulz iterations
+
+  # M3 Mixing parameters
+  m3_alpha_target: 0.5            # Target alpha after warmup (max entropy)
+  m3_alpha_start: 0.1             # Initial alpha (don't trust garbage history)
+  m3_warmup_steps: 500            # Steps to ramp from start to target
+
+  # Safety parameters
+  qk_gain_circuit_breaker: 2.0    # Max gain before freezing projection
+  saturation_kill_threshold: 0.20 # 20% saturation triggers kill
+  saturation_kill_patience: 100   # Steps of saturation before kill
+
+  # Regularization
+  dropout: 0.1
+
+  # Learning rate gate scaling (was hardcoded as 0.1)
+  eta_scale: 0.1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Training Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+training:
+  # TNT Stage 1 (Efficiency-focused)
+  stage1:
+    shard_length: 2048            # Tokens per shard (reset interval)
+    total_tokens: 100000000       # 100M tokens (~1.7x params, quick validation)
+    chunk_size: 128               # Tokens per training chunk
+
+  # TNT Stage 2 (Performance-focused)
+  stage2:
+    chunk_sizes: [2, 4, 8, 16]    # Multi-resolution chunk sizes
+    tokens_per_chunk: 10000000    # ~5% of Stage 1 per chunk size
+
+  # Optimizer
+  optimizer: "AdamW"
+  weight_decay: 0.1
+  grad_clip: 1.0
+
+  # Learning rate schedule
+  lr:
+    peak: 0.0001                  # 1e-4 peak LR
+    min: 0.000001                 # 1e-6 minimum LR
+    warmup_steps: 1000
+    schedule: "cosine"
+
+  # Differential LR (neocortex vs hippocampus)
+  # Global learns 100x slower than local
+  differential_lr_ratio: 0.01
+
+  # Batch configuration
+  batch_size: 4                   # Per-step batch size (increase with more VRAM)
+  gradient_accumulation: 8        # Effective batch = batch_size * gradient_accumulation
+
+  # Checkpointing
+  checkpoint_interval: 1000       # Save checkpoint every N steps
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Cache Configuration (v4.2 Hybrid Caching)
+# ═══════════════════════════════════════════════════════════════════════════════
+cache:
+  enabled: true
+  lazy_threshold: 0               # 0 = strict (always recompute), >0 = allow staleness
+  gradient_magnitude_threshold: 0.00000001  # 1e-8 weight drift invalidation
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Logging and Monitoring
+# ═══════════════════════════════════════════════════════════════════════════════
+logging:
+  level: "INFO"
+  tensorboard: false
+  wandb: false
+
+  telemetry:
+    log_interval: 100             # Log every N steps
+    track_saturation: true        # Monitor tanh saturation
+    track_alpha: true             # Monitor M3 alpha values
+    track_cache_stats: true       # Monitor cache hit/miss
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Hardware Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+hardware:
+  device: "cuda"
+  dtype: "bfloat16"               # BF16 for numerical stability
+  distributed: false              # Phase 1: single GPU
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Validation Gates (PRD Section 0)
+# ═══════════════════════════════════════════════════════════════════════════════
+validation:
+  isolation_suite: true           # Run isolation tests before training
+  max_nan_steps: 0                # NaN = immediate failure
+  max_loss_spike_ratio: 3.0       # Loss spike warning threshold
+  min_alpha_range: [0.1, 0.9]     # Alpha shouldn't collapse to these extremes
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Paths
+# ═══════════════════════════════════════════════════════════════════════════════
+paths:
+  data_dir: "data/"
+  checkpoint_dir: "runs/checkpoints/"
+  log_dir: "runs/logs/"
+  tensorboard_dir: "runs/tensorboard/"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Dataset Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+data:
+  # HuggingFace dataset (for streaming mode)
+  dataset: "HuggingFaceFW/fineweb-edu"
+  subset: "sample-10BT"           # Dataset subset (null if none)
+  text_column: "text"
+
+  # Tokenizer - MUST match model.vocab_size (SmolLM uses same tokenizer as GPT-2 family)
+  tokenizer: "HuggingFaceTB/SmolLM-135M"
+
+  # Pre-tokenized data (null = use streaming)
+  # Run: python scripts/prepare_data.py --config configs/default.yaml
+  pretokenized_path: "data/"
+
+  # Streaming (ignored if pretokenized_path is set)
+  streaming: true
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Validation Run Configuration (runs separately from training)
+# ═══════════════════════════════════════════════════════════════════════════════
+validation_run:
+  gpu: 2                          # GPU ID for validation (RTX 2000 Ada)
+  max_batches: null               # null = full validation set
+  watch_interval: 60              # Seconds between checkpoint watches
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# M3 Safety Configuration (previously hardcoded)
+# ═══════════════════════════════════════════════════════════════════════════════
+m3_safety:
+  danger_high: 0.95               # Alpha > this triggers warning
+  danger_low: 0.05                # Alpha < this triggers warning
+  post_warmup_monitor_steps: 1000 # Steps to monitor after warmup
+  regularization_low_boundary: 0.1
+  regularization_high_boundary: 0.9
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Newton-Schulz Configuration (previously hardcoded)
+# ═══════════════════════════════════════════════════════════════════════════════
+newton_schulz:
+  warmup_steps: 50                # Warmup period for K decay
+  k_max: 3                        # Max iterations at shard boundary
+  k_min: 1                        # Min iterations after warmup
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Seed Model Configuration (Ad Hoc Level Stacking - NL Paper Section 7.3)
+# ═══════════════════════════════════════════════════════════════════════════════
+# The seed model provides initial weights for the CMS/memory blocks, solving
+# the "cold start" problem. Without this, random initialization guarantees
+# instability pockets during early training.
+seed_model:
+  enabled: true                   # Use seed model for initialization
+  model_name: "HuggingFaceTB/SmolLM-135M"  # HuggingFace model ID
+  cache_dir: null                 # Optional: local cache directory
+
+  # Which layers to extract for seeding (0-indexed)
+  # SmolLM-135M has 30 layers; we use first 6 to match our n_layers
+  source_layers: [0, 5, 10, 15, 20, 25]  # Spread across depth for diverse features
+
+  # Weight mapping strategy
+  # "mlp_to_memory": Map MLP weights to M_init (memory matrix)
+  # "attention_to_qk": Map attention weights to QK projection
+  mapping_strategy: "mlp_to_memory"
+
+  # Learning rate for seed weights (lower = stay closer to seed)
+  # This controls how much the model drifts from the seed during training
+  seed_lr_multiplier: 0.1         # 10x slower than base LR for seeded weights
