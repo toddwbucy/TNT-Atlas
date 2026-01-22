@@ -14,13 +14,31 @@ This project explores whether memory-augmented attention mechanisms can improve 
 
 ## Current Status
 
+### Run History
+
 | Run | Gain | Result | Issue |
 |-----|------|--------|-------|
 | Run #1 | 0.5 | FAILED | Dead gates - tanh operating in linear region |
 | Run #2 | 2.0 | FAILED | Linear gates - model bypassed memory system |
-| Run #3 | 4.0 | PENDING | Attempting forced nonlinear operation |
+| Run #3 | 4.0 | FAILED | Gates still linear at low activations |
+| Run #4 | 5.0 | FAILED | Gain parameter stuck (BF16 precision issue) |
+| Run #5 | 6.0 | FAILED | Same BF16 precision issue |
+| Run #6 | 5.0 + 100x LR | FAILED | Confirmed BF16 quantizing updates to zero |
+| **Run #7** | **log-param** | **RUNNING** | ✓ Fix verified - gain learning correctly |
 
-See [docs/PRD_RUN2_FIXES.md](docs/PRD_RUN2_FIXES.md) for detailed failure analysis and iterative fixes.
+### Run #7 Progress (Current)
+
+**Status:** Training in progress with BF16 precision fix (log-parameterization)
+
+| Step | Avg Loss | Effective Gain | Notes |
+|------|----------|----------------|-------|
+| 0 | 11.19 | 5.00 (init) | Initial state |
+| 1000 | 7.51 | ~0.96 | ✓ log_gain learning verified |
+| 2000 | 6.91 | ~1.00 | ✓ Gain stabilized at optimal value |
+
+**Key Discovery (BN-001):** BFloat16 precision at value 5.0 (~0.04) couldn't detect gradient updates of ~1e-5. Solution: log-parameterization keeps learnable parameter near 1.6 where precision is ~0.013. See [docs/build-notes.md](docs/build-notes.md).
+
+**Architectural Insight:** Model learned to reduce effective gain from 5.0 → 1.0, suggesting optimal gain is near 1.0 for this architecture.
 
 ## Architecture
 
