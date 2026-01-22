@@ -9,11 +9,11 @@ Operational findings and lessons learned during Atlas development. These notes c
 **Date:** 2026-01-22
 **Severity:** Critical
 **Affects:** BFloat16, Float16, FP8 training
-**Component:** QKProjectionLayer.input_gain
+**Component:** QKProjectionLayer.log_gain (formerly `input_gain`)
 
 ### Problem
 
-Learnable `input_gain` parameter initialized at 5.0 failed to learn despite:
+Learnable `input_gain` parameter (now `log_gain`) initialized at 5.0 failed to learn despite:
 - Being correctly included in optimizer
 - Having 100x learning rate boost
 - Gradients flowing (verified via exp_avg in optimizer state)
