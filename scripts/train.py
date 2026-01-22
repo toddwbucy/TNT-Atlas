@@ -451,6 +451,10 @@ def create_differential_optimizer(
     v4.2: Global memory learns 100x slower than local (neocortex vs hippocampus).
     This is NOT frozen - continuous consolidation still happens.
 
+    v4.3 FIX: QK projection gain/scale params get 100x HIGHER LR.
+    These params have vanishing gradients (~1e-7) due to deep path through
+    Atlas memory system. Without boosted LR, they effectively don't learn.
+
     Args:
         model: The model
         base_lr: Base learning rate
@@ -460,13 +464,19 @@ def create_differential_optimizer(
     Returns:
         AdamW optimizer with differential param groups
     """
-    # Identify global memory parameters (look for patterns)
+    # Identify parameters by their role
     global_params = []
     local_params = []
+    qk_gain_params = []  # v4.3: Separate group for QK projection gain (needs high LR)
     other_params = []
 
     for name, param in model.named_parameters():
-        if 'M_init' in name or 'S_init' in name or 'P_init' in name:
+        if 'qk_proj_layer.log_gain' in name or 'qk_proj_layer.output_scale' in name:
+            # v4.3 FIX: QK projection learnable gain/scale need boosted LR
+            # Gradient magnitude is ~1e-7 (vanishing through deep memory path)
+            # v4.4: Now using log_gain (log-parameterized) for BF16/FP8 compatibility
+            qk_gain_params.append(param)
+        elif 'M_init' in name or 'S_init' in name or 'P_init' in name:
             # Memory state initializations are "global"
             global_params.append(param)
         elif 'm3_mixer' in name or 'alpha' in name:
@@ -477,6 +487,9 @@ def create_differential_optimizer(
             local_params.append(param)
         else:
             other_params.append(param)
+
+    # v4.3: QK gain LR = 100x base (to compensate for ~1e-7 gradient magnitude)
+    qk_gain_lr_multiplier = 100.0
 
     param_groups = [
         {
@@ -490,11 +503,22 @@ def create_differential_optimizer(
             'name': 'local_memory',
         },
         {
+            'params': qk_gain_params,
+            'lr': base_lr * qk_gain_lr_multiplier,
+            'name': 'qk_gain',  # v4.3: Boosted LR for vanishing gradient fix
+        },
+        {
             'params': other_params,
             'lr': base_lr,
             'name': 'other',
         },
     ]
+
+    print("  Optimizer param groups:")
+    print(f"    global_memory: {len(global_params)} params, lr={base_lr * differential_ratio:.6f}")
+    print(f"    local_memory:  {len(local_params)} params, lr={base_lr:.6f}")
+    print(f"    qk_gain:       {len(qk_gain_params)} params, lr={base_lr * qk_gain_lr_multiplier:.6f} (100x boost)")
+    print(f"    other:         {len(other_params)} params, lr={base_lr:.6f}")
 
     return torch.optim.AdamW(param_groups, weight_decay=weight_decay)
 

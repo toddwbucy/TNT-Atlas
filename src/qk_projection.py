@@ -9,11 +9,20 @@ v4.2 Safety Features:
 - Learnable input gain to prevent saturation
 - Saturation telemetry and kill switch
 - Circuit breaker for runaway gain
+
+v4.4 Low-Precision Fix (BN-001):
+- Log-parameterization for gain to enable learning in BF16/FP8
+- See docs/build-notes.md for details
 """
 
+import math
 import torch
 import torch.nn as nn
 from typing import Tuple, Dict, Any
+
+# Target initial gain value
+_INIT_GAIN = 5.0
+_INIT_LOG_GAIN = math.log(_INIT_GAIN)  # ≈ 1.6094
 
 
 class QKProjectionLayer(nn.Module):
@@ -27,12 +36,18 @@ class QKProjectionLayer(nn.Module):
     1. P_t = P_{t-1} + k_t k_t^T
     2. P_normalized = P_t / ||P_t||_F   <- NORMALIZE INPUT
     3. q_aligned = P_normalized @ q_t
-    4. q_gated = gain * q_aligned        <- LEARNABLE GAIN
-    5. q_safe = tanh(q_gated) * scale    <- SAFETY GATE
+    4. q_gated = exp(log_gain) * q_aligned   <- LOG-PARAMETERIZED GAIN (v4.4)
+    5. q_safe = tanh(q_gated) * scale        <- SAFETY GATE
+
+    v4.4 Low-Precision Fix:
+    Uses log-parameterization for gain to enable learning in BF16/FP8.
+    The learnable parameter is log_gain (initialized ~1.6), and effective
+    gain = exp(log_gain) ≈ 5.0. This keeps the learnable parameter near zero
+    where low-precision formats have better resolution.
 
     Args:
         d_model: Model dimension
-        gain_circuit_breaker: Max gain magnitude before freezing (default: 2.0)
+        gain_circuit_breaker: Max effective gain before freezing (default: 6.0)
         saturation_kill_threshold: Fraction of saturated activations to trigger kill (default: 0.20)
         saturation_kill_patience: Steps of sustained saturation before kill (default: 100)
     """
@@ -55,14 +70,22 @@ class QKProjectionLayer(nn.Module):
         super().__init__()
         self.d_model = d_model
 
-        # v4.2 -> v4.3: Learnable GAIN parameter (inside tanh, not outside)
-        # Run #1 FAILURE: gain=0.5 caused DEAD gates (tanh linear region)
-        # Run #2 FAILURE: gain=2.0 still linear - activations plateaued at 0.05
-        #   Model learned to BYPASS gates instead of using them
-        # Run #3 FIX: gain=4.0 forces nonlinear operation
-        #   With activation ~0.05, gain=4.0 gives tanh input ~0.2 → tanh(0.2)≈0.197
-        #   Need activations to grow OR gain high enough to force nonlinearity
-        self.input_gain = nn.Parameter(torch.ones(d_model) * 4.0)
+        # v4.4 LOW-PRECISION FIX (BN-001): Log-parameterized gain
+        #
+        # HISTORY:
+        # - Runs #1-3: Tuned gain value (0.5 → 2.0 → 4.0 → 5.0 → 6.0)
+        # - Runs #4-5: Discovered gains NOT learning despite 100x LR boost
+        # - Root cause: BF16 precision at value 5.0 is ~0.04, updates were ~1e-5
+        #   All gradient updates quantized to zero!
+        #
+        # FIX: Use log-parameterization
+        # - Learn log_gain ≈ 1.6 instead of gain = 5.0
+        # - BF16 precision at 1.6 is ~0.013 (3x better)
+        # - effective_gain = exp(log_gain) gives same functional behavior
+        # - Critical for FP8 where precision at 5.0 would be ~0.625
+        #
+        # See docs/build-notes.md BN-001 for full analysis
+        self.log_gain = nn.Parameter(torch.ones(d_model) * _INIT_LOG_GAIN)
 
         # Learnable scale factor - "volume knob" for output magnitude
         self.output_scale = nn.Parameter(torch.ones(d_model))
@@ -130,20 +153,25 @@ class QKProjectionLayer(nn.Module):
             # Project query (output is bounded because P_norm has unit energy)
             q_aligned = torch.einsum('bij,bj->bi', P_norm, q_t)
 
-            # v4.2 FIX: Learnable gain INSIDE tanh + CIRCUIT BREAKER
-            gain_magnitude = self.input_gain.abs().max().item()
+            # v4.4: Compute effective gain from log-parameterized value
+            # This enables learning in BF16/FP8 where direct gain would be stuck
+            effective_gain = torch.exp(self.log_gain)
+
+            # v4.2 CIRCUIT BREAKER: Check if effective gain exceeds threshold
+            gain_magnitude = effective_gain.abs().max().item()
             if not self.gain_frozen and gain_magnitude > self.gain_circuit_breaker:
                 self.gain_frozen.fill_(True)
                 self.gain_frozen_at_step.fill_(self.steps_observed.item())
-                # Clamp gain to safe range when freezing
+                # Clamp log_gain to keep effective gain in safe range
+                max_log_gain = math.log(self.gain_circuit_breaker)
                 with torch.no_grad():
-                    self.input_gain.data.clamp_(-self.gain_circuit_breaker, self.gain_circuit_breaker)
+                    self.log_gain.data.clamp_(-max_log_gain, max_log_gain)
+                # Recompute effective gain after clamping
+                effective_gain = torch.exp(self.log_gain)
 
-            # Use clamped gain if circuit breaker tripped (gradient won't flow)
+            # If circuit breaker tripped, detach to stop gradient flow
             if self.gain_frozen:
-                effective_gain = self.input_gain.detach()  # No gradient
-            else:
-                effective_gain = self.input_gain
+                effective_gain = effective_gain.detach()
 
             q_gated = effective_gain * q_aligned
 
@@ -180,11 +208,16 @@ class QKProjectionLayer(nn.Module):
             else:
                 self.consecutive_saturated_steps.zero_()  # Reset counter
 
+        # Compute effective gain for telemetry (exp of log-parameterized value)
+        effective_gain_for_telemetry = torch.exp(self.log_gain)
+
         telemetry: Dict[str, Any] = {
             'saturation_ema': self.saturation_ema.item(),
             'saturation_current': current_saturation.item() if saturation_samples else 0,
-            'input_gain_mean': self.input_gain.mean().item(),
-            'input_gain_max': self.input_gain.abs().max().item(),
+            'input_gain_mean': effective_gain_for_telemetry.mean().item(),  # Effective gain
+            'input_gain_max': effective_gain_for_telemetry.abs().max().item(),
+            'log_gain_mean': self.log_gain.mean().item(),  # v4.4: Log-param value for debugging
+            'log_gain_std': self.log_gain.std().item(),    # v4.4: Tracks learning
             'input_magnitude': self.last_input_magnitude.item(),  # v4.3: For kill switch
             'steps': self.steps_observed.item(),
             'gain_frozen': self.gain_frozen.item(),
@@ -220,13 +253,17 @@ class QKProjectionLayer(nn.Module):
 
         The regularization:
         1. Penalizes saturation > threshold (default 5%)
-        2. Penalizes large gain magnitudes (to prevent runaway)
+        2. Penalizes large effective gain magnitudes (to prevent runaway)
+
+        v4.4: Now uses effective gain (exp(log_gain)) for penalty calculation.
         """
         # Penalty 1: Saturation above threshold
         saturation_penalty = torch.relu(self.saturation_ema - saturation_threshold)
 
-        # Penalty 2: Large gain magnitude (prevents runaway toward circuit breaker)
-        gain_penalty = torch.relu(self.input_gain.abs() - 1.0).mean()
+        # Penalty 2: Large effective gain magnitude (prevents runaway toward circuit breaker)
+        # Use effective gain (exp(log_gain)) not the raw log_gain parameter
+        effective_gain = torch.exp(self.log_gain)
+        gain_penalty = torch.relu(effective_gain.abs() - 1.0).mean()
 
         return saturation_penalty + 0.1 * gain_penalty
 
