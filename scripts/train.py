@@ -514,7 +514,7 @@ def create_differential_optimizer(
         },
     ]
 
-    print(f"  Optimizer param groups:")
+    print("  Optimizer param groups:")
     print(f"    global_memory: {len(global_params)} params, lr={base_lr * differential_ratio:.6f}")
     print(f"    local_memory:  {len(local_params)} params, lr={base_lr:.6f}")
     print(f"    qk_gain:       {len(qk_gain_params)} params, lr={base_lr * qk_gain_lr_multiplier:.6f} (100x boost)")

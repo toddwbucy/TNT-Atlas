@@ -6,7 +6,7 @@ Operational findings and lessons learned during Atlas development. These notes c
 
 ## BN-001: Low-Precision Parameter Learning Failure
 
-**Date:** 2025-01-22
+**Date:** 2026-01-22
 **Severity:** Critical
 **Affects:** BFloat16, Float16, FP8 training
 **Component:** QKProjectionLayer.input_gain
@@ -28,7 +28,7 @@ Meanwhile, `output_scale` (same optimizer group, same LR) learned successfully, 
 
 BFloat16 has only 7-8 bits of mantissa. The smallest representable change at a given value is approximately:
 
-```
+```text
 resolution ≈ value × 2^(-7) ≈ value × 0.0078
 ```
 
@@ -143,7 +143,7 @@ if diff < init_value.abs().max() * 1e-6:
 
 ## Template for Future Notes
 
-```markdown
+```md
 ## BN-XXX: Title
 
 **Date:** YYYY-MM-DD
