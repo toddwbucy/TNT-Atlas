@@ -24,41 +24,66 @@ This project explores whether memory-augmented attention mechanisms can improve 
 | Run #4 | 5.0 | FAILED | Gain parameter stuck (BF16 precision issue) |
 | Run #5 | 6.0 | FAILED | Same BF16 precision issue |
 | Run #6 | 5.0 + 100x LR | FAILED | Confirmed BF16 quantizing updates to zero |
-| **Run #7** | **log-param** | **RUNNING** | ✓ Fix verified - gain learning correctly |
+| Run #7 | log-param | FAILED | Kill switch at step 16,600 - double normalization squeeze |
+| **Run #8** | **v4.5 fix** | **PREPARING** | Query L2 norm removed (Issue #5, PR #6) |
 
-### Run #7 Progress (Current)
+### Run #7 Post-Mortem
 
-**Status:** Training in progress with BF16 precision fix (log-parameterization)
+**Status:** Kill switch activated at step 16,600
 
-#### Training Metrics
+#### What Happened
+- BF16 precision fix (BN-001) worked correctly - gain was learning
+- Kill switch triggered: all 6 layers had activations < 0.1 for 1000 consecutive steps
+- Root cause: **Double normalization squeeze** (Issue #5)
 
-| Step | Train Loss | Train PPL | Tokens | Progress |
-|------|------------|-----------|--------|----------|
-| 0 | 11.19 | 72,403 | 0 | 0% |
-| 1000 | 7.51 | 1,826 | 512K | 0.5% |
-| 4000 | 7.08 | 1,188 | 2.0M | 2.0% |
-| 8000 | 6.64 | 765 | 4.1M | 4.1% |
-| 12000 | 6.56 | 710 | 6.1M | 6.1% |
-| 13500+ | ~6.7 | ~810 | ~6.9M | ~7% |
+#### Root Cause Analysis
 
-#### Validation Metrics
+The architecture had two normalizations that compounded to squeeze the signal:
 
-| Step | Train Loss | Val Loss | Val PPL | Train/Val Gap |
-|------|------------|----------|---------|---------------|
-| 11000 | 5.69 | 6.74 | 848 | 18.5% |
-| 12000 | 6.56 | 6.72 | **827** | 2.4% |
+1. **Query L2 normalized**: `||q|| = 1.0`
+2. **P Frobenius normalized**: `||P||_F = 1.0`, but `||P||_op ≈ 0.18`
 
-#### Health Status
-- ✅ Loss reduced 99% (72,403 → 827 PPL)
-- ✅ Healthy train/val gap (no overfitting)
-- ✅ All saturation levels at 0.0
-- ✅ Effective gain stable at ~1.0
-- ✅ No kill switches triggered
-- ✅ Training speed stable at ~236 tok/s
+Result: `||P_norm @ q|| ≈ 0.04` → tanh operates in linear region → dead gates
+
+The model compensated by:
+- Dropping gain from 5.0 → 1.0 (couldn't help - input already tiny)
+- Increasing output_scale to 2-6 (trying to amplify weak signal)
+
+But memory signal was still too weak to compete with full-strength attention.
+
+#### Training Metrics (before kill switch)
+
+| Step | Train Loss | Val Loss | Val PPL |
+|------|------------|----------|---------|
+| 11000 | 5.69 | 6.74 | 848 |
+| 12000 | 6.56 | 6.72 | 827 |
+| 16600 | ~6.8 | - | - |
+
+### Run #8 Preparation (Current)
+
+**Status:** Preparing to start
+
+#### v4.5 Fix (PR #6)
+
+Removed query L2 normalization while keeping key L2 normalization:
+
+| Configuration | tanh input (gain=5.0) | Status |
+|---------------|----------------------|--------|
+| Before (v4.4) | 0.007 | ❌ Linear region (dead gates) |
+| After (v4.5)  | 0.18  | ✅ Nonlinear region (functional) |
+
+Changes:
+- `atlas_block.py`: Query projection no longer L2-normalized
+- `minimal_block.py`: Aligned test block with production behavior
+- `qk_projection.py`: Documented v4.5 coordination
+
+#### Expected Outcomes
+- Tanh gates should operate in nonlinear region from the start
+- Learnable gain has room to tune up or down
+- Memory pathway should compete effectively with attention
+- Kill switch should NOT trigger
 
 **Key Discovery (BN-001):** BFloat16 precision at value 5.0 (~0.04) couldn't detect gradient updates of ~1e-5. Solution: log-parameterization keeps learnable parameter near 1.6 where precision is ~0.013. See [docs/build-notes.md](docs/build-notes.md).
-
-**Architectural Insight:** Model learned to reduce effective gain from 5.0 → 1.0, suggesting optimal gain is near 1.0 for this architecture.
 
 ## Architecture
 
