@@ -18,6 +18,7 @@ billion parameter run in 5 days.
 MANDATORY: ALL 8 TESTS MUST PASS before Phase 1 training.
 """
 
+import math
 import sys
 import torch
 import torch.nn.functional as F
@@ -348,7 +349,6 @@ def test_tanh_saturation_newton_schulz_interaction():
     # SABOTAGE: Force tanh input to be HUGE (guaranteed saturation)
     # v4.4: input_gain renamed to log_gain (log-parameterized)
     # log_gain = log(50) ≈ 3.91 gives effective gain of 50
-    import math
     with torch.no_grad():
         model.qk_proj.log_gain.fill_(math.log(50.0))  # Way beyond normal
 
