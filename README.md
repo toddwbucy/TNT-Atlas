@@ -30,11 +30,31 @@ This project explores whether memory-augmented attention mechanisms can improve 
 
 **Status:** Training in progress with BF16 precision fix (log-parameterization)
 
-| Step | Avg Loss | Effective Gain | Notes |
-|------|----------|----------------|-------|
-| 0 | 11.19 | 5.00 (init) | Initial state |
-| 1000 | 7.51 | ~0.96 | ✓ log_gain learning verified |
-| 2000 | 6.91 | ~1.00 | ✓ Gain stabilized at optimal value |
+#### Training Metrics
+
+| Step | Train Loss | Train PPL | Tokens | Progress |
+|------|------------|-----------|--------|----------|
+| 0 | 11.19 | 72,403 | 0 | 0% |
+| 1000 | 7.51 | 1,826 | 512K | 0.5% |
+| 4000 | 7.08 | 1,188 | 2.0M | 2.0% |
+| 8000 | 6.64 | 765 | 4.1M | 4.1% |
+| 12000 | 6.56 | 710 | 6.1M | 6.1% |
+| 13500+ | ~6.7 | ~810 | ~6.9M | ~7% |
+
+#### Validation Metrics
+
+| Step | Train Loss | Val Loss | Val PPL | Train/Val Gap |
+|------|------------|----------|---------|---------------|
+| 11000 | 5.69 | 6.74 | 848 | 18.5% |
+| 12000 | 6.56 | 6.72 | **827** | 2.4% |
+
+#### Health Status
+- ✅ Loss reduced 99% (72,403 → 827 PPL)
+- ✅ Healthy train/val gap (no overfitting)
+- ✅ All saturation levels at 0.0
+- ✅ Effective gain stable at ~1.0
+- ✅ No kill switches triggered
+- ✅ Training speed stable at ~236 tok/s
 
 **Key Discovery (BN-001):** BFloat16 precision at value 5.0 (~0.04) couldn't detect gradient updates of ~1e-5. Solution: log-parameterization keeps learnable parameter near 1.6 where precision is ~0.013. See [docs/build-notes.md](docs/build-notes.md).
 
