@@ -198,10 +198,12 @@ class MinimalAtlasBlock(nn.Module):
 
     def get_telemetry(self) -> Dict[str, Any]:
         """Get combined telemetry from all components."""
+        # v4.4: input_gain renamed to log_gain, compute effective gain
+        effective_gain = torch.exp(self.qk_proj.log_gain)
         return {
             'qk_saturation_ema': self.qk_proj.saturation_ema.item(),
             'qk_gain_frozen': self.qk_proj.gain_frozen.item(),
-            'qk_input_gain_max': self.qk_proj.input_gain.abs().max().item(),
+            'qk_effective_gain_max': effective_gain.abs().max().item(),
             'm3_alpha': self.m3_mixer.alpha.item(),
             'm3_warmup_complete': self.m3_mixer.warmup_complete.item(),
             'm3_alpha_ema': self.m3_mixer.alpha_ema.item(),

@@ -256,8 +256,20 @@ class AtlasMAGBlock(nn.Module):
         # BRANCH 2: Atlas Deep Memory
         # ═══════════════════════════════════════════════════════════════
         # Project Q, K, V from normalized input
-        q = F.normalize(self.mem_q_proj(x_norm), p=2, dim=-1)
-        k = F.normalize(self.mem_k_proj(x_norm), p=2, dim=-1)
+        #
+        # v4.5 FIX (Issue #5): Remove query L2 normalization to fix
+        # "double normalization squeeze" that caused Run #7 kill switch.
+        #
+        # Previously: Both query AND P were normalized, squeezing signal to ~0.001
+        # Now: Only keys are L2-normalized (for P subspace structure), queries
+        # retain natural magnitude from projection layer.
+        #
+        # Key insight: Frobenius norm of P ≠ operator norm. The Frobenius
+        # normalization reduced effective signal by ~6x. Without query L2 norm,
+        # the learnable gain can properly control tanh activation level.
+        #
+        q = self.mem_q_proj(x_norm)  # No L2 norm - let gain control scale
+        k = F.normalize(self.mem_k_proj(x_norm), p=2, dim=-1)  # Keep for P structure
         v = self.mem_v_proj(x_norm)
 
         # Initialize or unpack memory state

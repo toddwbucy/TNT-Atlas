@@ -13,6 +13,13 @@ v4.2 Safety Features:
 v4.4 Low-Precision Fix (BN-001):
 - Log-parameterization for gain to enable learning in BF16/FP8
 - See docs/build-notes.md for details
+
+v4.5 Double Normalization Fix (Issue #5):
+- Query L2 normalization removed in atlas_block.py
+- This layer's P Frobenius normalization now works correctly
+- Previously: L2(q) + Frob(P) squeezed signal to ~0.001 (dead gates)
+- Now: q retains projection magnitude, gain controls tanh activation
+- See Issue #5 for full root cause analysis
 """
 
 import math
