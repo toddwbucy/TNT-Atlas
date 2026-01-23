@@ -138,8 +138,9 @@ class MinimalAtlasBlock(nn.Module):
             self.m3_mixer.update_telemetry()
 
         # Project Q, K
-        q = F.normalize(self.q_proj(x), p=2, dim=-1)
-        k = F.normalize(self.k_proj(x), p=2, dim=-1)
+        # v4.5: Remove query L2 norm to match AtlasMAGBlock (Issue #5)
+        q = self.q_proj(x)  # No L2 norm - let gain control scale
+        k = F.normalize(self.k_proj(x), p=2, dim=-1)  # Keep for P structure
 
         # Q-K Projection (with tanh safety gate)
         q_aligned, P_new, qk_telemetry = self.qk_proj(q, k, self._P)
@@ -198,10 +199,12 @@ class MinimalAtlasBlock(nn.Module):
 
     def get_telemetry(self) -> Dict[str, Any]:
         """Get combined telemetry from all components."""
+        # v4.4: input_gain renamed to log_gain, compute effective gain
+        effective_gain = torch.exp(self.qk_proj.log_gain)
         return {
             'qk_saturation_ema': self.qk_proj.saturation_ema.item(),
             'qk_gain_frozen': self.qk_proj.gain_frozen.item(),
-            'qk_input_gain_max': self.qk_proj.input_gain.abs().max().item(),
+            'qk_effective_gain_max': effective_gain.abs().max().item(),
             'm3_alpha': self.m3_mixer.alpha.item(),
             'm3_warmup_complete': self.m3_mixer.warmup_complete.item(),
             'm3_alpha_ema': self.m3_mixer.alpha_ema.item(),
