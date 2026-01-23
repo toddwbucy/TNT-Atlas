@@ -138,8 +138,9 @@ class MinimalAtlasBlock(nn.Module):
             self.m3_mixer.update_telemetry()
 
         # Project Q, K
-        q = F.normalize(self.q_proj(x), p=2, dim=-1)
-        k = F.normalize(self.k_proj(x), p=2, dim=-1)
+        # v4.5: Remove query L2 norm to match AtlasMAGBlock (Issue #5)
+        q = self.q_proj(x)  # No L2 norm - let gain control scale
+        k = F.normalize(self.k_proj(x), p=2, dim=-1)  # Keep for P structure
 
         # Q-K Projection (with tanh safety gate)
         q_aligned, P_new, qk_telemetry = self.qk_proj(q, k, self._P)
